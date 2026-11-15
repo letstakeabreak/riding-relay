@@ -34,7 +34,7 @@ adb shell am start -n ai.ridingrelay.app/.MainActivity
 `apk/라이딩릴레이_release.apk` (release 빌드, 시연용으로 debug 키 서명)
 
 ## 검증 기록 (2026-11-15, 에뮬레이터)
-- 단위 테스트 16개 통과(`RelayEngineTest`): 주행 중 점유 꺼짐 무시, 문 미개방 무시, 이전 정차의 문 열림 미반영, 중복 확정 방지 등
+- 단위 테스트 19개 통과(`RelayEngineTest`): 주행 중 점유 꺼짐 무시, 문 미개방 무시, 이전 정차의 문 열림 미반영, 중복 확정 방지 등
 - `tools/demo.sh` 5회 연속 통과: 두 아이 하차 확정, 목적지 영어학원, 수학학원, 집 순서로 변경
 - 시연 영상은 release APK로 녹화했습니다.
 

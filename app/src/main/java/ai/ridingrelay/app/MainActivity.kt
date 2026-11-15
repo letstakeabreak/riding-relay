@@ -312,20 +312,44 @@ class MainActivity : Activity() {
      * 넓은 창은 두 단: 왼쪽에 지금 할 일 하나, 오른쪽에 오늘 정차지와 타고 있는 아이.
      * 좁은 창(앱 두 개가 나란히 뜰 때)은 같은 내용을 한 단으로 쌓는다. 경고는 맨 위 전체 폭 띠로 보여 준다.
      */
+    /**
+     * 실제로 보이는 창 높이. 가로로 긴 화면에서는 시스템이 알려 주는 창 높이가 화면보다 클 수 있어
+     * (Emulator v2.1.0에서 화면을 2560x960으로 바꿨을 때 확인) 화면 높이에서 아래 독을 뺀 값으로 자른다.
+     */
+    private fun visibleHeightPx(): Int {
+        val bounds = windowManager.currentWindowMetrics.bounds
+        val display = windowManager.maximumWindowMetrics.bounds
+        return minOf(bounds.bottom, display.bottom - dp(DOCK_DP)) - bounds.top
+    }
+
+    /** 가로로 긴 차량 화면(세로가 낮은 창)인지. 그릴 때마다 다시 잰다. */
+    private var short = false
+
     private fun buildScreen(): View {
         val c = colors
-        val wide = resources.configuration.screenWidthDp >= 1000
+        val cfg = resources.configuration
+        val wide = Layout.isWide(cfg.screenWidthDp)
+        val visible = visibleHeightPx()
+        short = Layout.isShort(cfg.screenWidthDp, (visible / resources.displayMetrics.density).toInt())
         val left = col()
         content(left, wide)
-        val root = col().apply { setBackgroundColor(c.background); setPadding(dp(40), dp(40), dp(40), dp(40)) }
-        if (!parked) warning()?.let { root.addView(banner(it.first), lp(match, dp(104)).apply { bottomMargin = dp(24) }) }
+        val pad = if (short) 20 else 40
+        val root = col().apply { setBackgroundColor(c.background); setPadding(dp(40), dp(pad), dp(40), dp(pad)) }
+        if (!parked) warning()?.let {
+            root.addView(banner(it.first), lp(match, dp(if (short) 76 else 104)).apply { bottomMargin = dp(if (short) 16 else 24) })
+        }
         if (wide) {
             root.addView(row().apply {
                 gravity = Gravity.TOP
-                addView(left, lp(0, match, 1f, top = 16, start = 16).apply { marginEnd = dp(40) })
+                addView(left, lp(0, match, 1f, top = if (short) 4 else 16, start = 16).apply { marginEnd = dp(40) })
                 addView(stopsPanel(true), lp(dp(592), match))
             }, lp(match, 0, 1f))
-            return root
+            if (!short) return root
+            // 창이 화면 아래로 넘치는 경우에도 보이는 높이 안에 모두 놓는다
+            return android.widget.FrameLayout(this).apply {
+                setBackgroundColor(c.background)
+                addView(root, android.widget.FrameLayout.LayoutParams(match, visible))
+            }
         }
         root.addView(left, lp(match, wrap))
         root.addView(stopsPanel(false), lp(match, wrap, top = 32))
@@ -342,23 +366,26 @@ class MainActivity : Activity() {
             v.addView(text(title, if (wide) 64f else 52f, 700, c.textPrimary).apply { maxLines = 2 }, lp(wrap, wrap, top = 8))
             if (sub != null) v.addView(text(sub, 36f, 400, c.textSecondary), lp(wrap, wrap, top = 8))
         }
-        fun label(s: String) = v.addView(text(s, 28f, 400, c.textSecondary), lp(wrap, wrap, top = 40))
-        fun hint(s: String) = v.addView(text(s, 28f, 400, c.textSecondary), lp(wrap, wrap, top = 24))
+        val kidH = if (short) 144 else 184
+        val stepsH = if (short) 104 else 132
+        val gap = if (short) 20 else 40
+        fun label(s: String) = v.addView(text(s, 28f, 400, c.textSecondary), lp(wrap, wrap, top = if (short) 20 else 40))
+        fun hint(s: String) = v.addView(text(s, 28f, 400, c.textSecondary), lp(wrap, wrap, top = if (short) 14 else 24))
         fun bottom(view: View) {
             if (wide) v.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-            v.addView(view, lp(match, dp(112), top = 32))
+            v.addView(view, lp(match, dp(if (short) 100 else 112), top = if (short) 16 else 32))
         }
         fun driving() {
             val off = gettingOff()
             head("다음 정차지", next.name, if (off.isEmpty()) whoGetsOff() else null)
-            if (off.isNotEmpty()) v.addView(hero(off, wide), lp(match, wrap, top = 40))
+            if (off.isNotEmpty()) v.addView(hero(off, wide), lp(match, wrap, top = if (short) 24 else 40))
             val after = engine.route().drop(1).firstOrNull() ?: return
             label("그다음")
             val then = riders.filter { it.stop.name == after && dropOf(it) == null }
             v.addView(
                 infoRow(then.firstOrNull()?.let { looks[it.name] }, after,
-                    if (then.isEmpty()) "모두 내린 뒤에 가요" else "${then.joinToString(", ") { it.name }} 하차", 144),
-                lp(match, dp(144), top = 16)
+                    if (then.isEmpty()) "모두 내린 뒤에 가요" else "${then.joinToString(", ") { it.name }} 하차", if (short) 120 else 144),
+                lp(match, dp(if (short) 120 else 144), top = 16)
             )
         }
         when {
@@ -369,13 +396,13 @@ class MainActivity : Activity() {
                     open.isNotEmpty() -> {
                         head("달리는 중", "문을 닫아 주세요")
                         for (r in ordered.filter { it.seat in open })
-                            v.addView(kidRow(r, r.name, "${seatText(r)} 문이 열려 있어요"), lp(match, dp(184), top = 24))
+                            v.addView(kidRow(r, r.name, "${seatText(r)} 문이 열려 있어요"), lp(match, dp(kidH), top = if (short) 16 else 24))
                         hint("안전한 곳에 세운 뒤 문을 닫아 주세요.")
                     }
                     still.isNotEmpty() -> {
                         val names = still.joinToString(", ") { it.name }
                         head(still[0].stop.name, "$names${josa(names, "이", "가")} 내리지 않았어요")
-                        for (r in still) v.addView(kidRow(r, r.name, "${seatText(r)}에 앉아 있어요"), lp(match, dp(184), top = 24))
+                        for (r in still) v.addView(kidRow(r, r.name, "${seatText(r)}에 앉아 있어요"), lp(match, dp(kidH), top = if (short) 16 else 24))
                         hint("안전한 곳에 세운 뒤 확인해 주세요.")
                     }
                     else -> driving()
@@ -385,7 +412,15 @@ class MainActivity : Activity() {
                 val boarded = engine.onboard().map { it.name }
                 head("오늘 라이딩", "학원 ${riders.map { it.stop }.distinct().size}곳 들렀다 집으로")
                 label("탑승 확인")
-                for (r in ordered) {
+                if (short) {
+                    // 가로형: 아이 카드를 좌우로 놓고 탑승 상태를 이름 아래에 둔다
+                    v.addView(row().apply {
+                        ordered.forEachIndexed { i, r ->
+                            val on = r.name in boarded
+                            addView(boardCard(r, on), lp(0, match, 1f, start = if (i == 0) 0 else 16))
+                        }
+                    }, lp(match, dp(176), top = 16))
+                } else for (r in ordered) {
                     val on = r.name in boarded
                     v.addView(kidRow(r, r.name, seatText(r), if (on) "자리에 앉았어요" else "기다리는 중", on, dim = !on),
                         lp(match, dp(184), top = 16))
@@ -402,14 +437,14 @@ class MainActivity : Activity() {
                 for (r in ordered) {
                     val d = dropOf(r)
                     v.addView(kidRow(r, r.name, r.stop.name, d?.let { "${clock.format(Date(it.timeMs))} 하차 확인" }, true),
-                        lp(match, dp(184), top = if (r == ordered[0]) 40 else 16))
+                        lp(match, dp(kidH), top = if (r == ordered[0]) gap else 16))
                 }
             }
             drop != null -> {
                 val r = riders.first { it.name == drop.rider }
                 head(drop.stop, "${drop.rider} 잘 내렸어요", "다음은 ${next.name}")
-                v.addView(kidRow(r, r.name, "내렸어요, ${clock.format(Date(drop.timeMs))}"), lp(match, dp(184), top = 40))
-                label("하차 확인"); v.addView(steps(r), lp(match, dp(132), top = 16))
+                v.addView(kidRow(r, r.name, "내렸어요, ${clock.format(Date(drop.timeMs))}"), lp(match, dp(kidH), top = gap))
+                label("하차 확인"); v.addView(steps(r), lp(match, dp(stepsH), top = 16))
                 hint(if (engine.isDoorOpen(r.seat)) "문을 닫으면 출발할 수 있어요." else "이제 출발해도 돼요.")
             }
             engine.askingAbout().isNotEmpty() -> {
@@ -417,8 +452,8 @@ class MainActivity : Activity() {
                 val ask = engine.askingAbout()
                 val names = ask.joinToString(", ") { it.name }
                 head(ask[0].stop.name, "$names${josa(names, "이", "가")} 내렸나요?")
-                for (r in ask) v.addView(kidRow(r, r.name, "${seatText(r)}에 앉아 있어요"), lp(match, dp(184), top = 24))
-                label("하차 확인"); v.addView(steps(ask[0]), lp(match, dp(132), top = 16))
+                for (r in ask) v.addView(kidRow(r, r.name, "${seatText(r)}에 앉아 있어요"), lp(match, dp(kidH), top = if (short) 16 else 24))
+                label("하차 확인"); v.addView(steps(ask[0]), lp(match, dp(stepsH), top = 16))
                 hint("아이가 내린 것을 직접 본 뒤에 눌러 주세요.")
                 bottom(button("내렸어요", true, true) { confirm(ask) })
             }
@@ -426,14 +461,14 @@ class MainActivity : Activity() {
                 // 도착: 누가 내릴 차례인지와 부모가 남긴 전달 메모를 보여 준다
                 val off = riders.filter { engine.canConfirm(it) }
                 v.addView(text("${off[0].stop.name} 도착", 32f, 400, c.textSecondary))
-                v.addView(turnHero(off, wide), lp(match, wrap, top = 24))
+                v.addView(turnHero(off, wide), lp(match, wrap, top = if (short) 12 else 24))
                 val note = off.joinToString(" ") { it.note }.trim()
                 if (note.isNotEmpty()) v.addView(row().apply {
-                    background = round(c.surface, 44); setPadding(dp(32), dp(22), dp(32), dp(22))
+                    background = round(c.surface, 44); setPadding(dp(32), dp(if (short) 14 else 22), dp(32), dp(if (short) 14 else 22))
                     addView(MarkView(DOT_POS), LinearLayout.LayoutParams(dp(24), dp(24)))
                     addView(text("전달 메모: $note", 32f, 600, c.textPrimary).apply { maxLines = 2 }, lp(wrap, wrap, start = 20))
-                }, lp(match, wrap, top = 32))
-                label("하차 확인"); v.addView(steps(off[0]), lp(match, dp(132), top = 16))
+                }, lp(match, wrap, top = if (short) 16 else 32))
+                label("하차 확인"); v.addView(steps(off[0]), lp(match, dp(stepsH), top = 16))
                 hint("아이가 내리면 자동으로 확인돼요.")
                 bottom(button("직접 확인했어요", false, true) { confirm(off) })
             }
@@ -449,12 +484,13 @@ class MainActivity : Activity() {
     /** 주행 중 화면의 가운데: 이번 정차지에서 내릴 아이. */
     private fun hero(off: List<Rider>, wide: Boolean): View = row().apply {
         val c = colors
-        val d = if (wide) 232 else 184
-        background = round(c.surface, 36); setPadding(dp(48), dp(if (wide) 64 else 48), dp(48), dp(if (wide) 64 else 48))
+        val d = if (short) 176 else if (wide) 232 else 184
+        val padV = if (short) 28 else if (wide) 64 else 48
+        background = round(c.surface, 36); setPadding(dp(48), dp(padV), dp(48), dp(padV))
         addView(AvatarView(looks[off[0].name]), LinearLayout.LayoutParams(dp(d), dp(d)))
         addView(col().apply {
             addView(text("여기서 내려요", 28f, 400, c.textSecondary))
-            addView(text(off.joinToString(", ") { it.name }, if (wide) 96f else 80f, 700, c.textPrimary))
+            addView(text(off.joinToString(", ") { it.name }, if (wide && !short) 96f else 80f, 700, c.textPrimary))
             addView(text(off.joinToString(", ") { seatText(it) }, if (wide) 36f else 30f, 400, c.textSecondary), lp(wrap, wrap, top = 4))
         }, lp(wrap, wrap, start = 44))
     }
@@ -462,16 +498,33 @@ class MainActivity : Activity() {
     /** 도착 화면: 뒷자리 아이도 알아보도록 프로필과 이름을 가장 크게 보여 준다. */
     private fun turnHero(off: List<Rider>, wide: Boolean): View = row().apply {
         val c = colors
-        val d = if (wide) 300 else 220
+        val big = wide && !short
+        val d = if (short) 168 else if (wide) 300 else 220
         addView(AvatarView(looks[off[0].name]), LinearLayout.LayoutParams(dp(d), dp(d)))
         addView(col().apply {
-            addView(text(off.joinToString(", ") { it.name }, if (wide) 136f else 104f, 700, c.textPrimary))
-            addView(text("내릴 차례예요", if (wide) 56f else 44f, 600, c.textPrimary))
+            addView(text(off.joinToString(", ") { it.name }, if (big) 136f else if (short) 92f else 104f, 700, c.textPrimary))
+            addView(text("내릴 차례예요", if (big) 56f else 44f, 600, c.textPrimary))
         }, lp(wrap, wrap, start = if (wide) 48 else 40))
     }
 
     private fun kidRow(r: Rider, title: String, sub: String, right: String? = null, check: Boolean = false, dim: Boolean = false) =
-        infoRow(looks[r.name], title, sub, 184, right, check, dim)
+        infoRow(looks[r.name], title, sub, if (short) 144 else 184, right, check, dim)
+
+    /** 가로형 탑승 확인 카드: 얼굴, 이름, 자리, 그 아래에 탑승 상태. */
+    private fun boardCard(r: Rider, on: Boolean): View = row().apply {
+        val c = colors
+        background = round(c.surface, 32); setPadding(dp(24), 0, dp(24), 0)
+        addView(AvatarView(looks[r.name]).apply { if (!on) alpha = 0.45f }, LinearLayout.LayoutParams(dp(112), dp(112)))
+        addView(col().apply {
+            addView(text(r.name, 48f, 700, c.textPrimary))
+            addView(text(seatText(r), 28f, 400, c.textSecondary), lp(wrap, wrap, top = 2))
+            addView(row().apply {
+                if (on) addView(MarkView(CHECK), LinearLayout.LayoutParams(dp(26), dp(26)))
+                addView(text(if (on) "자리에 앉았어요" else "기다리는 중", 28f, 600, if (on) c.textPrimary else c.textSecondary),
+                    lp(wrap, wrap, start = if (on) 12 else 0))
+            }, lp(wrap, wrap, top = 6))
+        }, lp(0, wrap, 1f, start = 24))
+    }
 
     private fun infoRow(
         look: Look?, title: String, sub: String, height: Int,
@@ -528,7 +581,7 @@ class MainActivity : Activity() {
     /** 오늘 정차지 목록과 타고 있는 아이. 지금 가는 곳만 흰 카드로 띄운다. */
     private fun stopsPanel(withRiders: Boolean): View = col().apply {
         val c = colors
-        background = round(c.surface, 36); setPadding(dp(16), dp(30), dp(16), dp(28))
+        background = round(c.surface, 36); setPadding(dp(16), dp(if (short) 20 else 30), dp(16), dp(if (short) 16 else 28))
         addView(text("오늘 정차지", 28f, 400, c.textSecondary), lp(wrap, wrap, start = 16))
         val now = if (started) engine.nextStop() else null
         class Line(val name: String, val sub: String?, val state: Int)
@@ -551,12 +604,34 @@ class MainActivity : Activity() {
                 }, lp(0, wrap, 1f, start = 30))
                 addView(text(if (current) "지금" else if (line.state == DONE_DARK) "완료" else "", 28f, if (current) 600 else 400,
                     if (current) c.positiveText else c.textSecondary))
-            }, lp(match, dp(120), top = if (i == 0) 16 else 0))
+            }, lp(match, dp(if (short) 88 else 120), top = if (i == 0) 16 else 0))
         }
         if (!withRiders) return@apply
         addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
-        addView(text("타고 있는 아이", 28f, 400, c.textSecondary), lp(wrap, wrap, top = 24, start = 16))
+        addView(text("타고 있는 아이", 28f, 400, c.textSecondary), lp(wrap, wrap, top = if (short) 8 else 24, start = 16))
         val onboard = engine.onboard().map { it.name }
+        if (short) {
+            // 가로형: 두 아이를 한 줄에 나란히 놓는다
+            addView(row().apply {
+                for (r in riders.sortedBy { it.seat.ordinal }) {
+                    val d = dropOf(r)
+                    val on = r.name in onboard
+                    addView(row().apply {
+                        setPadding(dp(16), 0, dp(8), 0)
+                        addView(AvatarView(looks[r.name]).apply { if (!on) alpha = 0.45f }, LinearLayout.LayoutParams(dp(68), dp(68)))
+                        addView(col().apply {
+                            addView(text(r.name, 30f, 600, c.textPrimary))
+                            addView(row().apply {
+                                if (on) addView(MarkView(DOT_ACTIVE), LinearLayout.LayoutParams(dp(14), dp(14)))
+                                addView(text(d?.let { "내렸어요, ${clock.format(Date(it.timeMs))}" } ?: if (on) "탑승 중" else "기다리는 중",
+                                    24f, 400, c.textSecondary), lp(wrap, wrap, start = if (on) 10 else 0))
+                            })
+                        }, lp(0, wrap, 1f, start = 16))
+                    }, lp(0, match, 1f))
+                }
+            }, lp(match, dp(92)))
+            return@apply
+        }
         for (r in riders.sortedBy { it.seat.ordinal }) {
             val d = dropOf(r)
             val on = r.name in onboard
@@ -755,6 +830,7 @@ class MainActivity : Activity() {
         private const val CHECK = 6
         private const val DOT_POS = 7
         private const val DOT_ACTIVE = 8
+        private const val DOCK_DP = 140   // Pleos Connect 화면 아래 독의 높이
 
         // Emulator v2.1.0 + Vehicle SDK 2.3.2: 차량 HAL은 SEAT_OCCUPANCY를 1(빈자리), 2(착석)로 보내는데
         // SDK는 1일 때 true를 돌려준다. 그래서 에뮬레이터에서는 값이 반대로 들어온다(2026-11-15 확인).
